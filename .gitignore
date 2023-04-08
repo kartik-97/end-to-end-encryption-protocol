@@ -164,3 +164,4 @@ logs/
 temp*
 learn/
 config.yaml
+backup-code.txt
