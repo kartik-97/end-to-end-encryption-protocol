@@ -24,6 +24,9 @@ random_nonce = {}
 shared_aes_key = None
 # Print lock
 print_lock = threading.Lock()
+# CA public key
+ca_public_key = None
+
 
 def read_server_message(client_socket):
     # first read the length of the message as a 4 byte integer
@@ -158,22 +161,38 @@ def get_all_certificates(client_socket, name):
         "command": "request/certificates"
     }
 
-    # send the client request message
+    # Send the client request message
     write_server_message(client_socket, client_message_structure)
 
-    # read the server response message
+    # Read the server response message
     server_message_structure = read_server_message(client_socket)
-
-    # read all the certificates from the server
-    certificates_base64 = server_message_structure['parameters']['certificates-base64']
+    command = server_message_structure['command']
+    if command != 'response/certificates':
+        print(f'err: invalid command {command} from server')
+        return False
+    
+    # Get all the certificates from the server
+    parameters = server_message_structure['parameters']
+    certificates_base64 = parameters['certificates-base64']
+    signatures_base64 = parameters['signatures-base64']
     global certificates
 
     for client, certificate_base64 in certificates_base64.items():
         certificate_bytes = algorithms.decode_base64_string_to_bytes(certificate_base64)
+        signature_base64 = signatures_base64[client]
+        signature_bytes = algorithms.decode_base64_string_to_bytes(signature_base64)
+        is_valid = algorithms.verify_signature_with_rsa_pkcs1v15_and_sha3_256(ca_public_key, certificate_bytes, signature_bytes)
+        if is_valid:
+            print(f'certificate of {client} is valid')
+        else:
+            print(f'err: certificate of {client} is invalid')
+            return False
+
         certificate_string = certificate_bytes.decode('utf-8')
         certificates[client] = certificate_string
     
     print('all certificates received from the server')
+    return True
 
 
 def send_client_ready_message(client_socket, name):
@@ -429,33 +448,43 @@ def handle_user_input(client_socket, name):
 
 def run(short_name='a'):
     name = f'client-{short_name}'
-    # print config values
+    # Print config values
     print('client:', name)
     print('server_address:', server_address)
     print('server_port:', server_port)
     print('log_level:', log_level)
 
-    # read rsa private key
+    # Store client rsa private key
     global rsa_private_key
     rsa_private_key = algorithms.get_private_key_pem_format_from_keyfile(f'certs/{name}.key')
     
-    # create a socket
+    # Store ca public key
+    global ca_public_key
+    with open('certs/ca.pub.pem', 'r') as f:
+        ca_public_key = f.read()
+
+    # Store the client certificate
+    global certificates
+    with open(f'certs/{name}.crt', 'r') as f:
+        certificates[name] = f.read()
+
+    # Create a socket
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    # connect to the server
+    # Connect to the server
     client_socket.connect((server_address, server_port))
 
-    # authenticate with the server
+    # Authenticate with the server
     ok = authenticate(client_socket, name)
     if not ok:
         client_socket.close()
         print('err: authentication failed')
         return
 
-    # get all certificates for all the clients from the server
+    # Get all certificates for all the clients from the server
     get_all_certificates(client_socket, name)
 
-    # inform the this instance of the client is ready to start the shared session key generation
+    # Inform the this instance of the client is ready to start the shared session key generation
     send_client_ready_message(client_socket, name)
 
     # Wait for the other clients to connect

@@ -103,22 +103,30 @@ def write_client_message(client_socket, message_structure):
     client_socket.sendall(message_bytes)
 
 
-def send_all_certificates(client_socket):
+def send_all_certificates(client_socket, client_message_structure):
+    name = client_message_structure['name']
     # Prepare the list of clients
-    clients = [
+    clients = {
         "client-a",
         "client-b",
         "client-c",
-    ]
+    }
+    clients.remove(name)
 
     # Read the certificates of the clients
     certificates = {}
+    signatures = {}
     for client in clients:
         certificate_filename = f'certs/{client}.crt'
         with open(certificate_filename, 'rb') as f:
             certificate_data = f.read()
             certificate_data_base64 = algorithms.encode_bytes_to_base64_string(certificate_data)
             certificates[client] = certificate_data_base64
+        signature_filename = f'certs/{client}.sig'
+        with open(signature_filename, 'rb') as f:
+            signature_data = f.read()
+            signature_data_base64 = algorithms.encode_bytes_to_base64_string(signature_data)
+            signatures[client] = signature_data_base64
 
     # Create the server response message
     server_message_structure = {
@@ -126,6 +134,7 @@ def send_all_certificates(client_socket):
         "command": "response/certificates",
         "parameters": {
             "certificates-base64": certificates,
+            "signatures-base64": signatures,
         }
     }
 
@@ -309,7 +318,7 @@ def handle_client(client_socket, client_address):
             print(f'{client_name} disconnected')
             break
         elif command == "request/certificates":
-            send_all_certificates(client_socket)
+            send_all_certificates(client_socket, client_message_structure)
             print(f'{client_name} requested all certificates')
         elif command == "request/send-message":
             send_message(client_message_structure)
@@ -329,6 +338,26 @@ def handle_client(client_socket, client_address):
     print(f"client {client_name} disconnected")
         
 
+def validate_certificates():
+    ca_public_key_file = 'certs/ca.pub.pem'
+    with open(ca_public_key_file, 'r') as f:
+        ca_public_key = f.read()
+    certs = ['client-a', 'client-b', 'client-c', 'server-s']
+    for cert in certs:
+        cert_file = f'certs/{cert}.crt'
+        with open(cert_file, 'rb') as f:
+            cert_bytes = f.read()
+        sig_file = f'certs/{cert}.sig'
+        with open(sig_file, 'rb') as f:
+            sig_bytes = f.read()
+        ok = algorithms.verify_signature_with_rsa_pkcs1v15_and_sha3_256(ca_public_key, cert_bytes, sig_bytes)
+        if ok:
+            print(f'{cert} certificate is valid')
+        else:
+            print(f'{cert} certificate is invalid')
+            exit(1)
+        
+
 def run():
     # print config values
     print("server S")
@@ -341,6 +370,9 @@ def run():
     global server_rsa_private_key
     server_rsa_private_key_file = 'certs/server-s.key'
     server_rsa_private_key = algorithms.get_private_key_pem_format_from_keyfile(server_rsa_private_key_file)
+
+    # Validate the certificates once at the start
+    validate_certificates()
 
     # create a socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
