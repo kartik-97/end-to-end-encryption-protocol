@@ -1,31 +1,39 @@
-import socket
+import time
 import yaml
+import socket
+import threading
 import algorithms
 from yaml.loader import SafeLoader
 from _thread import start_new_thread
-import threading
-import time
 
 
 # read config file
 with open('config.yaml', 'r') as f:
     config = yaml.load(f, Loader=SafeLoader)
+
 # get config values
 server_address = config['common']['server_address']
 server_port = config['common']['server_port']
 log_level = config['client']['log_level']
+
 # Store private key
 rsa_private_key = None
+
 # Store all the certificates for all the clients sent by the server
 certificates = {}
+
 # Store random nonce for each client
 random_nonce = {}
+
 # Store shared key
 shared_aes_key = None
+
 # Print lock
 print_lock = threading.Lock()
+
 # File lock
 file_lock = threading.Lock()
+
 # CA public key
 ca_public_key = None
 
@@ -453,12 +461,15 @@ def handle_user_input(client_socket, name):
             inps = inp.split(' ')
             cmd = inps[0]
             options = inps[1:]
+            
             if cmd == '-e':
                 print('exiting...')
                 break
+            
             elif cmd == '-s':
                 get_server_role(client_socket)
                 time.sleep(0.2) # wait for the server to respond
+            
             elif cmd == '-h':
                 print()
                 print('help')

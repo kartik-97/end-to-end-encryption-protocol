@@ -1,18 +1,15 @@
-# Build a thread safe print function.
-# Build a thread safe way to log messages.
-# there is no need to maintain information about the last step.
-
-import socket
-from _thread import start_new_thread
-import threading
 import yaml
-from yaml.loader import SafeLoader
+import socket
+import threading
 import algorithms
+from yaml.loader import SafeLoader
+from _thread import start_new_thread
 
 
 # read config file
 with open('config.yaml', 'r') as f:
     config = yaml.load(f, Loader=SafeLoader)
+
 # get config values
 server_address = config['common']['server_address']
 server_port = config['common']['server_port']

@@ -166,3 +166,6 @@ learn/
 config.yaml
 backup-code.txt
 certs-bak/
+readme.txt
+test/
+temp-cert/

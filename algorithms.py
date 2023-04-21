@@ -2,12 +2,10 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad, unpad
 from Crypto.PublicKey import RSA
-from Crypto.Util import asn1
-from base64 import b64decode
 from Crypto.Cipher import PKCS1_v1_5
 from Crypto.Hash import SHA3_256
-import base64
 from Crypto.Signature import pkcs1_15
+import base64
 import yaml
 
 
@@ -61,7 +59,7 @@ def get_public_key_pem_format_from_self_signed_certificate_string(cert_string):
     # Extract the public key and signature from the certificate
     public_key_base64 = certificate['public-key-base64']
     # Decode the public key from base64
-    public_key = b64decode(public_key_base64)
+    public_key = base64.b64decode(public_key_base64)
     return public_key
 
 
@@ -147,7 +145,7 @@ def validate_certificate(cert_string):
     public_key_base64 = certificate['public-key-base64']
     signature_base64 = certificate['signature-base64']
     # Decode the public key and signature from base64
-    signature = b64decode(signature_base64)
+    signature = base64.b64decode(signature_base64)
     # generate total string
     total_string = name + public_key_base64
     total_bytes = total_string.encode('utf-8')
@@ -189,7 +187,6 @@ if __name__ == "__main__":
     # Print the decrypted plaintext
     print('decrypted_plaintext:', decrypted_plaintext)
 
-    
     print("\nRSA PKCS1v15")
     print("------------")
     # Get the public key in pem format of server-s
@@ -212,17 +209,16 @@ if __name__ == "__main__":
     print('plaintext:', plaintext)
 
     # Print the public key
-    print('public_key_pem:', public_key_pem)
+    print('\npublic_key_pem:', public_key_pem)
 
     # Print the private key
-    print('private_key_pem:', private_key_pem)
+    print('\nprivate_key_pem:', private_key_pem)
 
     # Print the ciphertext
-    print('ciphertext_bytes:', ciphertext_bytes)
+    print('\nciphertext_bytes:', ciphertext_bytes)
 
     # Print the decrypted plaintext
-    print('decrypted_plaintext:', decrypted_plaintext)
-
+    print('\ndecrypted_plaintext:', decrypted_plaintext)
 
     print("\nSHA3-256")
     print("--------")
@@ -230,7 +226,6 @@ if __name__ == "__main__":
     print('plaintext:', plaintext)
     # Print the hash of the plaintext, in hex format
     print('hash of plaintext:', hash_sha3_256(plaintext_bytes).hex())
-
 
     print("\nDeterministic Combination")
     print("-------------------------")
@@ -250,7 +245,6 @@ if __name__ == "__main__":
     # Print the combined bytes
     print('combined_bytes:', combined_bytes)
 
-
     print("\nBase64 Encoding")
     print("---------------")
     # Print the plaintext
@@ -261,7 +255,6 @@ if __name__ == "__main__":
 
     # Print the base64 encoding of the plaintext
     print('base64 encoding of plaintext:', base64_string)
-
 
     print("\nBase64 Decoding")
     print("---------------")
@@ -277,20 +270,19 @@ if __name__ == "__main__":
     # Print the decoded string
     print('decoded_string:', decoded_string)
 
-
     print("\nRSA PKCS1v15 and SHA3-256 Signature")
     print("-----------------------------------")
     # Print the plaintext
-    print('plaintext:', plaintext)
+    print('\nplaintext:', plaintext)
 
     # Sign the plaintext
     signature = sign_with_rsa_pkcs1v15_and_sha3_256(private_key_pem, plaintext_bytes)
 
     # Print the signature
-    print('signature:', signature)
+    print('\nsignature:', signature)
 
     # Verify the signature
     is_valid = verify_signature_with_rsa_pkcs1v15_and_sha3_256(public_key_pem, plaintext_bytes, signature)
 
     # Print whether the signature is valid
-    print('is signature valid:', is_valid)
+    print('\nis signature valid:', is_valid)
