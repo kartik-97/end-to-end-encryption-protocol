@@ -24,8 +24,12 @@ random_nonce = {}
 shared_aes_key = None
 # Print lock
 print_lock = threading.Lock()
+# File lock
+file_lock = threading.Lock()
 # CA public key
 ca_public_key = None
+
+line = '-' * 100
 
 
 def read_server_message(client_socket):
@@ -56,10 +60,20 @@ def write_server_message(client_socket, message_structure):
     client_socket.sendall(length_bytes)
     # send the message bytes
     client_socket.sendall(message_bytes)
+    # log message disk
+    try:
+        name = message_structure['name']
+        with file_lock:
+            with open(f'logs/{name}-log.yaml', 'a') as f:
+                f.write(f'\n---')
+                f.write(f'\n{message}')
+    except Exception as e:
+        print(e)
 
 
 def authenticate(client_socket, name):
-    # Step 1: send the client authentication request message
+    # AUTH_STEP1
+    # Step 1: send the client authentication message
     # Create random message of 32 bytes
     random_message = algorithms.generate_random_bytes(32) # has 2^256 possible values
     # Encode this random message to base64 string for transmission
@@ -80,7 +94,7 @@ def authenticate(client_socket, name):
     }
     # Send the client authentication request message
     write_server_message(client_socket, client_message_structure)
-    print(f'{name} sent authentication step 1 to server')
+    print(f'{name} sent authentication step 1 to server-s')
 
     # Step 2: read the server authentication response message and verify server
     # Read the server authentication response message
@@ -95,10 +109,19 @@ def authenticate(client_socket, name):
         print(f'err: invalid step {step} or command {command} from server')
         return False
 
-    # Obtain server certificate & public key
+    # VALIDATE_SERVER_CERT
+    # Obtain server certificate
     server_certificate_base64 = parameters['server-certificate-base64']
     server_certificate_bytes = algorithms.decode_base64_string_to_bytes(server_certificate_base64)
     server_certificate_string = server_certificate_bytes.decode('utf-8')
+    # Validate the server certificate
+    is_valid = algorithms.validate_certificate(server_certificate_string)
+    if is_valid:
+        print(f'{name} validated server-s certificate')
+    else:
+        print(f'err: {name} failed to validate server-s certificate')
+        return False
+    # Obtain server public key
     server_public_key = algorithms.get_public_key_pem_format_from_self_signed_certificate_string(server_certificate_string)
 
     # Obtain client random message from server
@@ -123,6 +146,7 @@ def authenticate(client_socket, name):
     # Combine server certificate bytes & encrypted server random message bytes & encrypted client random message bytes
     combined_bytes = server_certificate_bytes + encrypted_server_random_message_bytes + encrypted_client_random_message_bytes
 
+    # VERIFY_AUTH_STEP2
     # Verify the server signature
     is_valid = algorithms.verify_signature_with_rsa_pkcs1v15_and_sha3_256(server_public_key, combined_bytes, server_signature_bytes)
 
@@ -131,8 +155,9 @@ def authenticate(client_socket, name):
         print('err: invalid signature')
         return False
 
-    print(f'{server_name} completed step 2 of authentication')
+    print(f'{name} verified authentication step 2 of {server_name}')
 
+    # AUTH_STEP3
     # Step 3: create the client authentication response message
     hash_server_random_message_bytes = algorithms.hash_sha3_256(server_random_message_bytes)
     encrypted_hashed_server_random_message_bytes = algorithms.encrypt_rsa_pkcs1v15(server_public_key, hash_server_random_message_bytes)
@@ -147,14 +172,15 @@ def authenticate(client_socket, name):
         }
     }
 
-    print(f'{name} sending step 3 of authentication')
     write_server_message(client_socket, client_message_structure)
-    
+    print(f'{name} sent step 3 of authentication to server-s')
+
     print('authentication success')
     return True
 
 
 def get_all_certificates(client_socket, name):
+    # REQUEST_CERT
     # Make a request to the server to get all the certificates
     client_message_structure = {
         "name": name,
@@ -174,21 +200,18 @@ def get_all_certificates(client_socket, name):
     # Get all the certificates from the server
     parameters = server_message_structure['parameters']
     certificates_base64 = parameters['certificates-base64']
-    signatures_base64 = parameters['signatures-base64']
     global certificates
 
+    # VALIDATE_CLIENT_CERT
     for client, certificate_base64 in certificates_base64.items():
-        certificate_bytes = algorithms.decode_base64_string_to_bytes(certificate_base64)
-        signature_base64 = signatures_base64[client]
-        signature_bytes = algorithms.decode_base64_string_to_bytes(signature_base64)
-        is_valid = algorithms.verify_signature_with_rsa_pkcs1v15_and_sha3_256(ca_public_key, certificate_bytes, signature_bytes)
+        certificate_string = algorithms.decode_base64_string_to_bytes(certificate_base64)
+        is_valid = algorithms.validate_certificate(certificate_string)
         if is_valid:
             print(f'certificate of {client} is valid')
         else:
             print(f'err: certificate of {client} is invalid')
             return False
 
-        certificate_string = certificate_bytes.decode('utf-8')
         certificates[client] = certificate_string
     
     print('all certificates received from the server')
@@ -219,6 +242,7 @@ def share_random_nonce(client_socket, name):
     
     print('all clients are connected, starting shared session key generation ...')
     
+    # SHARE_NONCE
     # Make a request to the server to send message to all clients except this client
     client_set = set(certificates.keys())
     client_set.remove(name) # remove this client from the set
@@ -297,6 +321,7 @@ def share_random_nonce(client_socket, name):
         from_client_signed_hash_encrypted_nonce_base64 = message_structure['parameters']['signed-hash-encrypted-nonce-base64']
         from_client_signed_hash_encrypted_nonce = algorithms.decode_base64_string_to_bytes(from_client_signed_hash_encrypted_nonce_base64)
 
+        # VERIFY_NONCE
         # verify the signed hash of the encrypted nonce
         from_client_public_key = algorithms.get_public_key_pem_format_from_self_signed_certificate_string(certificates[from_client])
         is_valid = algorithms.verify_signature_with_rsa_pkcs1v15_and_sha3_256(from_client_public_key, from_client_encrypted_nonce, from_client_signed_hash_encrypted_nonce)
@@ -304,6 +329,7 @@ def share_random_nonce(client_socket, name):
             print('err: invalid signature')
             return False
         
+        # RECOVER_NONCE
         # decrypt the encrypted nonce
         from_client_decrypted_nonce = algorithms.decrypt_rsa_pkcs1v15(rsa_private_key, from_client_encrypted_nonce)
 
@@ -313,6 +339,7 @@ def share_random_nonce(client_socket, name):
 
 
 def generate_shared_session_key():
+    # GENERATE_SESSION_KEY
     # Make nonce_list in the order of the client names
     clients = [
         'client-a',
@@ -336,7 +363,7 @@ def get_server_role(client_socket):
     write_server_message(client_socket, client_message_structure)
 
 
-def send_message_to_client(client_socket, from_client, to_client, message):
+def send_message_to_client(client_socket, from_client, to_client, message, broadcast=False):
     # to client message structure
     to_client_message_structure = {
         "name": from_client,
@@ -358,19 +385,26 @@ def send_message_to_client(client_socket, from_client, to_client, message):
     # prepare the client request message
     client_message_structure = {
         "name": from_client,
-        "command": "request/send-message",
         "parameters": {
-            "to": to_client,
             "from": from_client,
             "message-base64": encrypted_message_base64
         }
     }
+
+    if broadcast:
+        # SEND_BROADCAST_MESSAGE
+        client_message_structure['command'] = 'request/send-message-to-all' # If server finds this command it will send message to all clients
+    else:
+        # SEND_UNICAST_MESSAGE
+        client_message_structure['command'] = 'request/send-message' # If server finds this command it will send message to only one client
+        client_message_structure['parameters']['to'] = to_client
 
     # send the client request message
     write_server_message(client_socket, client_message_structure)
 
 
 def print_message_from_other_clients(server_message_structure):
+    # RECV_UNICAST_MESSAGE
     from_client = server_message_structure['parameters']['from']
     message_base64 = server_message_structure['parameters']['message-base64']
     encrypted_message = algorithms.decode_base64_string_to_bytes(message_base64)
@@ -432,6 +466,7 @@ def handle_user_input(client_socket, name):
                 print('-h: To show this message')
                 print('-s: To get server roles')
                 print('-c <client-short-name> -m <msg>: To send message to client')
+                print('-b -m <msg>: To broadcast message to all clients except self')
                 print('-e: To exit the program')
                 print()
 
@@ -440,7 +475,17 @@ def handle_user_input(client_socket, name):
                 to_client = f'client-{options[0]}'
                 inps = inp.split('-m')
                 message = inps[1].strip()
+                print(f'sending message to {to_client}')
                 send_message_to_client(client_socket, from_client, to_client, message)
+        
+            elif cmd == '-b':
+                print('broadcasting message to all clients')
+                from_client = name
+                to_client = 'all' # Dummy value only
+                inps = inp.split('-m')
+                message = inps[1].strip()
+                send_message_to_client(client_socket, from_client, to_client, message, broadcast=True)
+        
         except Exception as e:
             print('err:', e)
             print('err: invalid syntax')
@@ -456,7 +501,8 @@ def run(short_name='a'):
 
     # Store client rsa private key
     global rsa_private_key
-    rsa_private_key = algorithms.get_private_key_pem_format_from_keyfile(f'certs/{name}.key')
+    with open(f'certs/{name}.key', 'r') as f:
+        rsa_private_key = f.read()
     
     # Store ca public key
     global ca_public_key

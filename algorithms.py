@@ -8,6 +8,7 @@ from Crypto.Cipher import PKCS1_v1_5
 from Crypto.Hash import SHA3_256
 import base64
 from Crypto.Signature import pkcs1_15
+import yaml
 
 
 def hash_sha3_256(data_bytes):
@@ -55,40 +56,19 @@ def decrypt_aes_ecb(key, ciphertext_bytes):
     return plaintext_bytes
 
 
-def get_public_key_pem_format_from_self_signed_certificate_string(pem_data):
-    # Remove the BEGIN and END lines from the certificate
-    lines = pem_data.strip().split('\n')
-    base64_data = ''
-    for line in lines:
-        if not line.startswith('-----'):
-            base64_data += line
-
-    # Decode the base64 data and parse the ASN.1 structure
-    der_data = b64decode(base64_data)
-    asn1_data = asn1.DerSequence()
-    asn1_data.decode(der_data)
-
-    # Extract the SubjectPublicKeyInfo (SPKI) part of the certificate
-    tbs_certificate = asn1.DerSequence()
-    tbs_certificate.decode(asn1_data[0])
-    spki = tbs_certificate[5]
-
-    # Extract the public key from the SPKI
-    rsa_key = RSA.import_key(spki)
-    return rsa_key.publickey().export_key()
+def get_public_key_pem_format_from_self_signed_certificate_string(cert_string):
+    certificate = yaml.load(cert_string, Loader=yaml.SafeLoader)
+    # Extract the public key and signature from the certificate
+    public_key_base64 = certificate['public-key-base64']
+    # Decode the public key from base64
+    public_key = b64decode(public_key_base64)
+    return public_key
 
 
 def get_public_key_pem_format_from_self_signed_certificate_file(filename):
     with open(filename, 'r') as f:
-        pem_data = f.read()
-    return get_public_key_pem_format_from_self_signed_certificate_string(pem_data)
-
-
-def get_private_key_pem_format_from_keyfile(filename):
-    with open(filename, 'r') as f:
-        key_data = f.read()
-    private_key = RSA.import_key(key_data)
-    return private_key.export_key()
+        cert_string = f.read()
+    return get_public_key_pem_format_from_self_signed_certificate_string(cert_string)
 
 
 def encrypt_rsa_pkcs1v15(public_key_pem, plaintext_bytes):
@@ -156,6 +136,31 @@ def verify_signature_with_rsa_pkcs1v15_and_sha3_256(public_key_pem, data_bytes, 
         return False
 
 
+def validate_certificate(cert_string):
+    # Get the public key of the CA
+    with open('certs/ca.pub.pem', 'r') as f:
+        public_key_ca = f.read()
+    # Validate the certificate
+    certificate = yaml.load(cert_string, Loader=yaml.SafeLoader)
+    # Extract the public key and signature from the certificate
+    name = certificate['name']
+    public_key_base64 = certificate['public-key-base64']
+    signature_base64 = certificate['signature-base64']
+    # Decode the public key and signature from base64
+    signature = b64decode(signature_base64)
+    # generate total string
+    total_string = name + public_key_base64
+    total_bytes = total_string.encode('utf-8')
+    # Verify the signature
+    return verify_signature_with_rsa_pkcs1v15_and_sha3_256(public_key_ca, total_bytes, signature)
+
+
+def validate_certificate_file(filename):
+    with open(filename, 'r') as f:
+        cert_string = f.read()
+    return validate_certificate(cert_string)
+
+
 # This function is used for testing the above functions
 # To run this file, run the following command:
 # python3 algorithms.py
@@ -191,7 +196,8 @@ if __name__ == "__main__":
     public_key_pem = get_public_key_pem_format_from_self_signed_certificate_file('certs/server-s.crt')
 
     # Get the private key in pem format of server-s
-    private_key_pem = get_private_key_pem_format_from_keyfile('certs/server-s.key')
+    with open('certs/server-s.key', 'r') as f:
+        private_key_pem = f.read()
 
     # Encrypt the plaintext
     ciphertext_bytes = encrypt_rsa_pkcs1v15(public_key_pem, plaintext_bytes)

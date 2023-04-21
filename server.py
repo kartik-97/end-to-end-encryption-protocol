@@ -18,6 +18,7 @@ server_address = config['common']['server_address']
 server_port = config['common']['server_port']
 max_connection = config['server']['max_connection']
 log_level = config['server']['log_level']
+line = '-' * 100
 
 # clients connected to the server
 client_structure_lock = threading.Lock() # since multiple threads will be accessing this structure at the same time we need to protect it with a lock
@@ -25,6 +26,9 @@ client_structure = {}
 
 # store server private key
 server_rsa_private_key = None
+
+# File lock
+file_lock = threading.Lock()
 
 # Count how many clients are ready to generate the shared session key
 class ClientReadyForKeyExchange:
@@ -101,9 +105,19 @@ def write_client_message(client_socket, message_structure):
     client_socket.sendall(length_bytes)
     # send the message bytes
     client_socket.sendall(message_bytes)
+    # log message disk
+    try:
+        name = message_structure['name']
+        with file_lock:
+            with open(f'logs/{name}-log.yaml', 'a') as f:
+                f.write(f'\n---')
+                f.write(f'\n{message}')
+    except Exception as e:
+        print(e)
 
 
 def send_all_certificates(client_socket, client_message_structure):
+    # SEND_CERT
     name = client_message_structure['name']
     # Prepare the list of clients
     clients = {
@@ -115,18 +129,12 @@ def send_all_certificates(client_socket, client_message_structure):
 
     # Read the certificates of the clients
     certificates = {}
-    signatures = {}
     for client in clients:
         certificate_filename = f'certs/{client}.crt'
         with open(certificate_filename, 'rb') as f:
             certificate_data = f.read()
             certificate_data_base64 = algorithms.encode_bytes_to_base64_string(certificate_data)
             certificates[client] = certificate_data_base64
-        signature_filename = f'certs/{client}.sig'
-        with open(signature_filename, 'rb') as f:
-            signature_data = f.read()
-            signature_data_base64 = algorithms.encode_bytes_to_base64_string(signature_data)
-            signatures[client] = signature_data_base64
 
     # Create the server response message
     server_message_structure = {
@@ -134,7 +142,6 @@ def send_all_certificates(client_socket, client_message_structure):
         "command": "response/certificates",
         "parameters": {
             "certificates-base64": certificates,
-            "signatures-base64": signatures,
         }
     }
 
@@ -159,6 +166,7 @@ def get_role(client_socket):
 
 
 def send_message(client_message_structure):
+    # FORWARD_UNICAST_MESSAGE
     parameters = client_message_structure["parameters"]
     to_client_name = parameters["to"]
     from_client_name = parameters["from"]
@@ -166,6 +174,7 @@ def send_message(client_message_structure):
 
     # create the server response message
     server_message_structure = {
+        "name": "server-s",
         "command": "response/send-message",
         "parameters": {
             "to": to_client_name,
@@ -182,7 +191,32 @@ def send_message(client_message_structure):
             print(f'Err: client {to_client_name} not found')
     
 
+def send_message_to_all(client_message_structure):
+    # FORWARD_BROADCAST_MESSAGE
+    parameters = client_message_structure["parameters"]
+    from_client_name = parameters["from"]
+    message = parameters["message-base64"]
+
+    with client_structure_lock:
+        other_clients = set(client_structure.keys())
+        other_clients.remove(from_client_name)
+        for client_name in other_clients:
+            client_socket = client_structure[client_name]['client_socket']
+            # create the server response message
+            server_message_structure = {
+                "name": "server-s",
+                "command": "response/send-message",
+                "parameters": {
+                    "to": client_name,
+                    "from": from_client_name,
+                    "message-base64": message,
+                }
+            }
+            write_client_message(client_socket, server_message_structure)
+
+
 def authenticate_client(client_socket, client_message_structure):
+    # VERIFY_AUTH_STEP1
     # Step 1: Server verifies step 1 of client
     # Extract parameters
     client_name = client_message_structure['name']
@@ -205,11 +239,9 @@ def authenticate_client(client_socket, client_message_structure):
         print(f'{client_name} failed step 1 of authentication')
         return False
 
-    with client_structure_lock:
-        client_structure[client_name]['last_authenticated_step'] = 1
-
-    print(f'{client_name} completed step 1 of authentication')
+    print(f'server-s verified authentication step 1 for {client_name}')
     
+    # AUTH_STEP2
     # Step 2: Server generates authentication message and sends to client
     # Read server certificate and store as base64 string
     with open('certs/server-s.crt', 'rb') as f:
@@ -244,8 +276,9 @@ def authenticate_client(client_socket, client_message_structure):
     }
 
     write_client_message(client_socket, server_message_structure)
-    print('server-s sent step 2 of authentication')
+    print(f'server-s sent step 2 of authentication to {client_name}')
 
+    # VERIFY_AUTH_STEP3
     # Step 3: server verifies step 3 from client
     # read client message
     client_message_structure = read_client_message(client_socket)
@@ -270,11 +303,7 @@ def authenticate_client(client_socket, client_message_structure):
         print('err: hashed server random message does not match in step 3')
         return False
     
-    with client_structure_lock:
-        client_structure[client_name]['authenticated'] = True
-        client_structure[client_name]['last_authenticated_step'] = 3
-
-    print(f'{client_name} completed step 3 of authentication')
+    print(f'server-s verified authentication step 3 for {client_name}')
     print(f'{client_name} authentication success')
     return True
 
@@ -296,8 +325,6 @@ def handle_client(client_socket, client_address):
     with client_structure_lock:
         client_structure[client_name] = {
             "name": client_name,
-            "authenticated": False,
-            "last_authenticated_step": 0,
             "client_socket": client_socket,
             "client_address": client_address,
         }
@@ -306,6 +333,8 @@ def handle_client(client_socket, client_address):
     ok = authenticate_client(client_socket, client_message_structure)
     if not ok:
         print(f'{client_name} failed authentication')
+        client_socket.close()
+        return
 
     # Client is authenticated, now handle client messages
     while True:
@@ -325,6 +354,9 @@ def handle_client(client_socket, client_address):
             print(f'{client_name} requested to send a message')
         elif command == "request/change-client-ready-state":
             client_ready.value += 1
+        elif command == "request/send-message-to-all":
+            send_message_to_all(client_message_structure)
+            print(f'{client_name} requested to send a broadcast message')
         else:
             print('invalid command')
             break
@@ -339,18 +371,9 @@ def handle_client(client_socket, client_address):
         
 
 def validate_certificates():
-    ca_public_key_file = 'certs/ca.pub.pem'
-    with open(ca_public_key_file, 'r') as f:
-        ca_public_key = f.read()
     certs = ['client-a', 'client-b', 'client-c', 'server-s']
     for cert in certs:
-        cert_file = f'certs/{cert}.crt'
-        with open(cert_file, 'rb') as f:
-            cert_bytes = f.read()
-        sig_file = f'certs/{cert}.sig'
-        with open(sig_file, 'rb') as f:
-            sig_bytes = f.read()
-        ok = algorithms.verify_signature_with_rsa_pkcs1v15_and_sha3_256(ca_public_key, cert_bytes, sig_bytes)
+        ok = algorithms.validate_certificate_file(f'certs/{cert}.crt')
         if ok:
             print(f'{cert} certificate is valid')
         else:
@@ -368,8 +391,8 @@ def run():
 
     # Server rsa private key
     global server_rsa_private_key
-    server_rsa_private_key_file = 'certs/server-s.key'
-    server_rsa_private_key = algorithms.get_private_key_pem_format_from_keyfile(server_rsa_private_key_file)
+    with open('certs/server-s.key', 'r') as f:
+        server_rsa_private_key = f.read()
 
     # Validate the certificates once at the start
     validate_certificates()
