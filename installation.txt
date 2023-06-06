@@ -1,0 +1,58 @@
+# These commands only work on Linux/MacOS.
+# It is recommend to use Linux if you are running this project.
+
+# Installing python3, pip3 and venv in Debian/Ubuntu/Mint.
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv
+
+# Remove the previous virtual environment if it exists.
+rm -rf venv
+
+# Create a new virtual environment.
+python3 -m venv venv
+
+# Activate the virtual environment. (You have to run this command in every terminal you are using.)
+# You will have to activate this 4 times in 4 different terminals.
+source venv/bin/activate
+
+# Install the package setup tool.
+pip3 install wheel
+
+# Update pip if required
+pip install --upgrade pip
+
+# Install the required packages to run only the project.
+pip3 install -r requirements.txt
+
+# Install the additional packages to run jupyter notebook.
+pip3 install -r requirements-with-jupyternotebook.txt
+
+# Execute the management module this module helps in executing server-s/client-a/client-b/client-c.
+# You have to run this command for 4 times in separate terminals.
+python3 main.py
+
+# In the clients you can type -h to get the help menu.
+# example:
+client-a > -h
+
+.... help output ....
+
+# In the clients you can type -c to send a unicast message.
+# example:
+client-a > -c b -m Hi I am A.
+
+# Will send message to only client b.
+
+# In the clients you can type -b to send a broadcast message.
+# example:
+client-a > -b -m Hi I am A.
+
+# Will send message to all clients.
+
+# To execute test cases in algorithms.py
+python3 algorithms.py
+
+
+# Incase if you are unable to the run the project.
+# You can reach me at.
+# Email: bhavya.gaur@outlook.com
