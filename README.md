@@ -1,5 +1,5 @@
 # End to End Encryption Protocol
-This project demonstrates the implementation of an end-to-end encryption protocol.
+This project implements an end-to-end encryption protocol.
 
 The following was achieved:
 
@@ -17,7 +17,7 @@ nonces between clients, which are subsequently used to generate a
 mutually agreed session key to be used with AES algorithm.
 
 ## Please read ProjectDocumentation.pdf
-It contains explanation of the e2e protocol
+It contains explanation of the e2e protocol.
 
 ## Please read installation.txt
-It contains installation instructions
+It contains installation instructions.
