@@ -21,3 +21,7 @@ It contains explanation of the e2e protocol.
 
 ## Please read installation.txt
 It contains installation instructions.
+
+## Project Contributors: 
+Kartik Jaitly 
+Bhavya Gaur 
